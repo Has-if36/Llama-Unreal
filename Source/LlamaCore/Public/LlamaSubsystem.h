@@ -5,6 +5,10 @@
 #include "Tickable.h"
 #include "Subsystems/EngineSubsystem.h"
 
+// Test
+#include "LlamaCore.h"
+#include "LlamaUtility.h"
+
 #include "LlamaSubsystem.generated.h"
 
 /** 
@@ -16,9 +20,40 @@ UCLASS(Category = "LLM")
 class LLAMACORE_API ULlamaSubsystem : public UEngineSubsystem
 {
     GENERATED_BODY()
+
+private:
+    FEventRef ProcessingDoneEvent = FEventRef(EEventMode::ManualReset);
+    FThreadSafeBool bIsProcessing = false; // FEventRef does not work well in android, so this var was delcared as fallback
+    FThreadSafeCounter totalUnmergedModel = FThreadSafeCounter(1);
+    FThreadSafeCounter mergedModelCounter = FThreadSafeCounter(0);
+    FCriticalSection ProcessEventMutex;
+
+public:
+    const FEventRef& GetProcessingDoneEvent() const {
+        return ProcessingDoneEvent;
+    }
+
+    UFUNCTION(BlueprintPure, Category = "System Info")
+    static int32 GetCoreProcessorCount();
+
+    UFUNCTION(BlueprintPure, Category = "System Info")
+    static int32 GetLogicalProcessorCount();
+
 public:
     virtual void Initialize(FSubsystemCollectionBase& Collection) override;
     virtual void Deinitialize() override;
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "LLM Prepare Model")
+    void PrepareModel();
+
+private:
+    void PrepareModel_Internal();
+    void EventTrigger();
+    void EventReset();
+
+public:
+    bool WaitForCompletion(uint32 WaitTimeMs = 0);
 
     //Main callback, updates for each token generated
     UPROPERTY(BlueprintAssignable)

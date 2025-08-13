@@ -5,7 +5,20 @@
 #include "Tickable.h"
 #include "LlamaNative.h"
 #include "LlamaUtility.h"
+
+#if !PLATFORM_ANDROID
 #include "Embedding/VectorDatabase.h"
+#endif
+
+int32 ULlamaSubsystem::GetCoreProcessorCount()
+{
+    return FPlatformMisc::NumberOfCores();
+}
+
+int32 ULlamaSubsystem::GetLogicalProcessorCount()
+{
+    return FPlatformMisc::NumberOfCoresIncludingHyperthreads();
+}
 
 void ULlamaSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -56,6 +69,125 @@ void ULlamaSubsystem::Deinitialize()
 	}
 
     Super::Deinitialize();
+}
+
+void ULlamaSubsystem::PrepareModel()
+{
+	const TCHAR* FunctionName = TEXT("ULlamaSubsystem::PrepareModel");
+    UE_LOG(LogTemp, Log, TEXT("%s"), FunctionName);
+
+    PrepareModel_Internal();
+}
+
+void ULlamaSubsystem::PrepareModel_Internal()
+{
+    const TCHAR* FunctionName = TEXT("ULlamaSubsystem::PrepareModel_Internal");
+    UE_LOG(LogTemp, Log, TEXT("%s"), FunctionName);
+
+    bool _bhasUnmergeModel = false;
+
+#if defined(LLAMA_MODELS)
+    // Check File
+    FString modelString(ANSI_TO_TCHAR(LLAMA_MODELS));
+
+    if (!modelString.IsEmpty()) {
+        TArray<FString> models;
+        modelString.ParseIntoArray(models, TEXT("|"), true);
+
+        FString writePathAbs = FLlamaPaths::ModelsRelativeRootPath();
+
+        UE_LOG(LogTemp, Log, TEXT("%s - Perform Merge"), FunctionName);
+        models = models.FilterByPredicate([&, writePathAbs](const FString& model) {
+            FString writeFileAbs = FPaths::Combine(writePathAbs, model);
+            return !FPlatformFileManager::Get().GetPlatformFile().FileExists(*writeFileAbs);
+            });
+
+        {
+            FScopeLock Lock(&ProcessEventMutex);
+
+            totalUnmergedModel.Set(models.Num());
+            mergedModelCounter.Set(0);
+
+#if PLATFORM_ANDROID
+            FPlatformMisc::MemoryBarrier();
+#endif
+        }
+
+        _bhasUnmergeModel = models.Num() > 0;
+        for (int i = 0; i < models.Num(); i++) {
+            FString eachModel = models[i];
+            FString writeFileAbs = FPaths::Combine(writePathAbs, eachModel);
+            FLLamaModelUtils::MergeModelFromPak(writeFileAbs, [this](const FString& path, bool bSuccess) {
+                //FLlamaString::LogPrint(ELogVerbosity::Type::Verbose, TEXT("ULlamaSubsystem::PostMergeModelFromPak"));
+
+                int counter = 0;
+                int total = 1;
+                {
+                    FScopeLock Lock(&ProcessEventMutex);
+
+                    mergedModelCounter.Increment();
+
+#if PLATFORM_ANDROID
+                    FPlatformMisc::MemoryBarrier();
+#endif
+
+                    total = totalUnmergedModel.GetValue();
+                    counter = mergedModelCounter.GetValue();
+                }
+
+                if (counter >= total) {
+                    this->EventTrigger();
+                }
+                }, EAsyncExecution::TaskGraphMainThread);
+        }
+    }
+#endif // LLAMA_MODELS
+
+    if (_bhasUnmergeModel) this->EventReset();
+    else this->EventTrigger();
+}
+
+void ULlamaSubsystem::EventTrigger() {
+    //FLlamaString::LogPrint(ELogVerbosity::Type::Verbose, TEXT("ULlamaSubsystem::EventTrigger"));
+
+    FScopeLock Lock(&ProcessEventMutex);
+
+    ProcessingDoneEvent->Trigger();
+	bIsProcessing = true;
+
+#if PLATFORM_ANDROID
+    FPlatformMisc::MemoryBarrier();
+#endif
+}
+
+void ULlamaSubsystem::EventReset() {
+    //FLlamaString::LogPrint(ELogVerbosity::Type::Verbose, TEXT("ULlamaSubsystem::EventReset"));
+
+    FScopeLock Lock(&ProcessEventMutex);
+
+    ProcessingDoneEvent->Reset();
+    bIsProcessing = false;
+
+#if PLATFORM_ANDROID
+    FPlatformMisc::MemoryBarrier();
+#endif
+}
+
+bool ULlamaSubsystem::WaitForCompletion(uint32 WaitTimeMs)
+{
+    //FLlamaString::LogPrint(ELogVerbosity::Type::Verbose, TEXT("ULlamaSubsystem::WaitForCompletion"));
+
+    bool _bIsProcessing = false;
+
+    {
+#if PLATFORM_ANDROID
+        FPlatformMisc::MemoryBarrier();
+#endif
+        FScopeLock Lock(&ProcessEventMutex);
+        _bIsProcessing = bIsProcessing;
+    }
+
+    return _bIsProcessing || ProcessingDoneEvent->Wait(WaitTimeMs);
 }
 
 void ULlamaSubsystem::InsertTemplatedPrompt(const FString& Text, EChatTemplateRole Role, bool bAddAssistantBOS, bool bGenerateReply)
@@ -160,6 +292,7 @@ void ULlamaSubsystem::ResumeGeneration()
 
 void ULlamaSubsystem::TestVectorSearch()
 {
+#if !PLATFORM_ANDROID
     FVectorDatabase* VectorDb = new FVectorDatabase();;
 
     UE_LOG(LogTemp, Log, TEXT("VectorDB Pre"));
@@ -168,6 +301,7 @@ void ULlamaSubsystem::TestVectorSearch()
 
     delete VectorDb;
     VectorDb = nullptr;
+#endif
 }
 
 FString ULlamaSubsystem::RawContextHistory()

@@ -9,26 +9,31 @@
 
 bool FLlamaInternal::LoadModelFromParams(const FLLMModelParams& InModelParams)
 {
+	FString functionName = FString("FLlamaInternal::LoadModelFromParams");
+
+    FLlamaString::LogPrint(ELogVerbosity::Type::Verbose, TEXT("%s"), *functionName);
+
     FString RHI = FHardwareInfo::GetHardwareDetailsString();
     FString GPU = FPlatformMisc::GetPrimaryGPUBrand();
 
-    UE_LOG(LogTemp, Log, TEXT("Device Found: %s %s"), *GPU, *RHI);
+    FLlamaString::LogPrint(ELogVerbosity::Type::Log, TEXT("%s Device Found: %s %s"), *functionName, *GPU, *RHI);
 
     LastLoadedParams = InModelParams;
 
     // only print errors
-    llama_log_set([](enum ggml_log_level level, const char* text, void* /* user_data */) 
+    llama_log_set([](enum ggml_log_level level, const char* text, void* /* user_data */)
     {
         if (level >= GGML_LOG_LEVEL_ERROR) {
             fprintf(stderr, "%s", text);
         }
     }, nullptr);
 
+#if !PLATFORM_ANDROID // Disable ggml_backend_load_all on Android
     // load dynamic backends
     ggml_backend_load_all();
+#endif
 
     std::string ModelPath = TCHAR_TO_UTF8(*FLlamaPaths::ParsePathIntoFullPath(InModelParams.PathToModel));
-
 
     //CommonParams Init (false)//
     if (false)
@@ -78,6 +83,7 @@ bool FLlamaInternal::LoadModelFromParams(const FLLMModelParams& InModelParams)
         LlamaModelParams.n_gpu_layers = InModelParams.GPULayers;
 
         LlamaModel = llama_model_load_from_file(ModelPath.c_str(), LlamaModelParams);
+
         if (!LlamaModel)
         {
             FString ErrorMessage = FString::Printf(TEXT("Unable to load model at <%hs>"), ModelPath.c_str());
@@ -285,7 +291,11 @@ void FLlamaInternal::UnloadModel()
 std::string FLlamaInternal::WrapPromptForRole(const std::string& Text, EChatTemplateRole Role, const std::string& OverrideTemplate, bool bAddAssistantBoS)
 {
     std::vector<llama_chat_message> MessageListWrapper;
+#if PLATFORM_ANDROID
+    MessageListWrapper.push_back({ RoleForEnum(Role), strdup(Text.c_str()) });
+#else
     MessageListWrapper.push_back({ RoleForEnum(Role), _strdup(Text.c_str()) });
+#endif
 
     //pre-allocate buffer 2x the size of text
     std::vector<char> Buffer;
@@ -458,7 +468,7 @@ std::string FLlamaInternal::InsertRawPrompt(const std::string& Prompt, bool bGen
     return "";
 }
 
-std::string FLlamaInternal::InsertTemplatedPrompt(const std::string& Prompt, EChatTemplateRole Role, bool bAddAssistantBoS, bool bGenerateReply)
+std::string FLlamaInternal::InsertTemplatedPrompt(const std::string& Prompt, EChatTemplateRole Role, bool bAddAssistantBoS, bool bGenerateReply, bool bAppendToMessageHistory, int32 maxToken)
 {
     if (!bIsModelLoaded)
     {
@@ -470,7 +480,11 @@ std::string FLlamaInternal::InsertTemplatedPrompt(const std::string& Prompt, ECh
 
     if (!Prompt.empty())
     {
+#if PLATFORM_ANDROID
+        Messages.push_back({ RoleForEnum(Role), strdup(Prompt.c_str()) });
+#else
         Messages.push_back({ RoleForEnum(Role), _strdup(Prompt.c_str()) });
+#endif
 
         NewLen = ApplyTemplateToContextHistory(bAddAssistantBoS);
     }
@@ -486,7 +500,7 @@ std::string FLlamaInternal::InsertTemplatedPrompt(const std::string& Prompt, ECh
     if (bGenerateReply)
     {
         //Run generation
-        Response = Generate();
+        Response = Generate("", bAppendToMessageHistory, maxToken);
     }
 
     return Response;
@@ -660,7 +674,7 @@ int32 FLlamaInternal::ProcessPrompt(const std::string& Prompt, EChatTemplateRole
     return NPromptTokens;
 }
 
-std::string FLlamaInternal::Generate(const std::string& Prompt, bool bAppendToMessageHistory)
+std::string FLlamaInternal::Generate(const std::string& Prompt, bool bAppendToMessageHistory, int32 maxToken)
 {
     const auto StartTime = ggml_time_us();
  
@@ -684,6 +698,7 @@ std::string FLlamaInternal::Generate(const std::string& Prompt, bool bAppendToMe
     int NContext = llama_n_ctx(Context);
     int NContextUsed = llama_kv_self_used_cells(Context);
     bool bEOGExit = false;
+	int32 _maxToken = maxToken > 0 ? maxToken - 1 : MAX_int32;
     
     while (bGenerationActive) //processing can be aborted by flipping the boolean
     {
@@ -699,7 +714,7 @@ std::string FLlamaInternal::Generate(const std::string& Prompt, bool bAppendToMe
         }
 
         // is it an end of generation?
-        if (llama_vocab_is_eog(Vocab, NewTokenId))
+        if (llama_vocab_is_eog(Vocab, NewTokenId) || NDecoded > _maxToken)
         {
             bEOGExit = true;
             break;
@@ -751,8 +766,11 @@ std::string FLlamaInternal::Generate(const std::string& Prompt, bool bAppendToMe
     if (bAppendToMessageHistory)
     {
         //Add the response to our templated messages
+#if PLATFORM_ANDROID
+        Messages.push_back({ RoleForEnum(EChatTemplateRole::Assistant), strdup(Response.c_str()) });
+#else
         Messages.push_back({ RoleForEnum(EChatTemplateRole::Assistant), _strdup(Response.c_str()) });
-
+#endif
         //Sync ContextHistory
         FilledContextCharLength = ApplyTemplateToContextHistory(false);
     }

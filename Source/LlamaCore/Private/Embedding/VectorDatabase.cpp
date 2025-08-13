@@ -1,6 +1,8 @@
 // Copyright 2025-current Getnamo.
 
 #include "Embedding/VectorDatabase.h"
+
+#if !PLATFORM_ANDROID
 #include "Misc/Paths.h"
 #include "hnswlib/hnswlib.h"
 #include "LlamaUtility.h"
@@ -201,3 +203,5 @@ FVectorDatabase::~FVectorDatabase()
     delete Private;
     Private = nullptr;
 }
+
+#endif // !PLATFORM_ANDROID

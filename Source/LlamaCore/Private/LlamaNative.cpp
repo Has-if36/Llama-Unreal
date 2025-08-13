@@ -2,6 +2,8 @@
 
 #include "LlamaNative.h"
 #include "LlamaUtility.h"
+#include "LlamaSubsystem.h"
+#include "LlamaCore.h"
 #include "Internal/LlamaInternal.h"
 #include "Async/TaskGraphInterfaces.h"
 #include "Async/Async.h"
@@ -276,8 +278,23 @@ void FLlamaNative::LoadModel(bool bForceReload, TFunction<void(const FString&, i
     //Copy so these dont get modified during enqueue op
     const FLLMModelParams ParamsAtLoad = ModelParams;
 
+    //FLlamaCoreModule& Module = FModuleManager::LoadModuleChecked<FLlamaCoreModule>("LlamaCore");
     EnqueueBGTask([this, ParamsAtLoad, ModelLoadedCallback](int64 TaskId)
     {
+        ULlamaSubsystem* llamaSubsystem = GEngine->GetEngineSubsystem<ULlamaSubsystem>();
+		const FEventRef& ProcessingDoneEvent = llamaSubsystem->GetProcessingDoneEvent();
+
+        if (!ProcessingDoneEvent->Wait(0)) {
+            FLlamaString::LogPrint(ELogVerbosity::Type::Verbose, TEXT("Files are still getting processed. This will takes some time"));
+
+            while (!llamaSubsystem->WaitForCompletion(500)) { 
+                //FLlamaString::LogPrint(ELogVerbosity::Type::Verbose, TEXT("Files still processing"));
+				FPlatformProcess::Sleep(0.01f); // Need to add delay to avoid looping too fast for wait function
+            }
+
+            FLlamaString::LogPrint(ELogVerbosity::Type::Verbose, TEXT("Files processing finished"));
+        }
+
         //Unload first if any is loaded
         Internal->UnloadModel();
 
@@ -294,7 +311,8 @@ void FLlamaNative::LoadModel(bool bForceReload, TFunction<void(const FString&, i
             //If we do it later, other queued calls will frontrun it. This enables startup chaining correctly
             if (ParamsAtLoad.bAutoInsertSystemPromptOnLoad)
             {
-                Internal->InsertTemplatedPrompt(FLlamaString::ToStd(ParamsAtLoad.SystemPrompt), EChatTemplateRole::System, false, false);
+				// Setting generateReply true for cold start, limitting to 10 tokens for consistent startup
+                Internal->InsertTemplatedPrompt(FLlamaString::ToStd(ParamsAtLoad.SystemPrompt), EChatTemplateRole::System, false, true, false, 10);
             }
 
             //Callback on game thread for data sync

@@ -53,7 +53,7 @@ public:
     std::string InsertRawPrompt(const std::string& Prompt, bool bGenerateReply = true);
 
     //main function for structure insert and generation
-    std::string InsertTemplatedPrompt(const std::string& Prompt, EChatTemplateRole Role = EChatTemplateRole::User, bool bAddAssistantBoS = true, bool bGenerateReply = true);
+    std::string InsertTemplatedPrompt(const std::string& Prompt, EChatTemplateRole Role = EChatTemplateRole::User, bool bAddAssistantBoS = true, bool bGenerateReply = true, bool bAppendToMessageHistory = true, int32 maxToken = -1);
 
     //continue generating from last stop
     std::string ResumeGeneration();
@@ -83,7 +83,7 @@ public:
 protected:
     //Wrapper for user<->assistant templated conversation
     int32 ProcessPrompt(const std::string& Prompt, EChatTemplateRole Role = EChatTemplateRole::Unknown);
-    std::string Generate(const std::string& Prompt = "", bool bAppendToMessageHistory = true);
+    std::string Generate(const std::string& Prompt = "", bool bAppendToMessageHistory = true, int32 maxToken = -1);
 
     void EmitErrorMessage(const FString& ErrorMessage, int32 ErrorCode = -1, const FString& FunctionName = TEXT("unknown"));
 

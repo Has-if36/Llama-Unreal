@@ -13,6 +13,13 @@ enum class EChatTemplateRole : uint8
     Unknown = 255
 };
 
+enum ELoadStatus
+{
+    Success,
+    Pending,
+    Failed,
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnErrorSignature, const FString&, ErrorMessage, int32, ErrorCode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTokenGeneratedSignature, const FString&, Token);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnResponseGeneratedSignature, const FString&, Response);
@@ -251,7 +258,7 @@ struct FLLMModelParams
 
     //If not different than default empty, no template will be applied
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")
-    FJinjaChatTemplate CustomChatTemplate = "";
+    FJinjaChatTemplate CustomChatTemplate;
 
     //If set anything other than unknown, AI chat role will be enforced. Assistant is default
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "LLM Model Params")

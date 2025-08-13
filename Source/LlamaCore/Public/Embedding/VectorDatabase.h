@@ -27,7 +27,7 @@ struct FVectorDBParams
 };
 
 
-
+#if !PLATFORM_ANDROID
 /** 
 * Unreal style native wrapper for HNSW nearest neighbor search for high dimensional vectors
 * !! v0.9.8 note NB: this class is a work in progress, currently not working yet !!
@@ -74,3 +74,4 @@ private:
     TMap<int64, FString> TextDatabase;
     int64 TextDatabaseMaxId = 0;
 };
+#endif // !PLATFORM_ANDROID
