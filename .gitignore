@@ -82,3 +82,8 @@ Content/Models/*
 ThirdParty/LlamaCpp/Win64/Cuda/cudart.lib
 ThirdParty/LlamaCpp/Win64/Cuda/cublas.lib
 ThirdParty/LlamaCpp/Win64/Cuda/cuda.lib
+
+# Others
+ThirdParty/*
+!ThirdParty/hnswlib
+!ThirdParty/LlamaCpp
